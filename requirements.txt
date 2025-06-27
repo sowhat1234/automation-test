@@ -1,0 +1,24 @@
+# Core dependencies for Facebook automation
+requests>=2.31.0
+python-dotenv>=1.0.0
+schedule>=1.2.0
+Pillow>=10.0.0
+cryptography>=41.0.0
+click>=8.1.0
+
+# Development dependencies
+pytest>=7.4.0
+pytest-mock>=3.11.0
+pytest-cov>=4.1.0
+black>=23.7.0
+flake8>=6.0.0
+pre-commit>=3.3.0
+
+# Optional dependencies for enhanced functionality
+colorama>=0.4.6  # Cross-platform colored terminal text
+rich>=13.4.0     # Rich text and beautiful formatting for the terminal
+python-dateutil>=2.8.2  # Powerful extensions to datetime
+pytz>=2023.3     # World timezone definitions
+
+# Security
+keyring>=24.2.0  # Store passwords securely
