@@ -7,8 +7,9 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional, List
+from datetime import datetime
 import os
 import uvicorn
 import logging
@@ -18,6 +19,7 @@ from dotenv import load_dotenv
 from config_manager import create_config_manager, setup_logging_from_config, validate_environment
 from facebook_api import create_facebook_client, FacebookAPIError, AuthenticationError, RateLimitError
 from post_manager import PostManager, ValidationError
+from scheduler import create_post_queue, PostQueue, ScheduledPost, SchedulingError, PostStatus, RecurrenceType
 
 # Load environment variables
 load_dotenv()
@@ -53,6 +55,7 @@ app.add_middleware(
 
 # Initialize global components
 post_manager = PostManager()
+post_queue = create_post_queue()
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 
@@ -70,6 +73,76 @@ class PostResponse(BaseModel):
     post_id: Optional[str] = None
     message: str
     error_code: Optional[str] = None
+
+# Scheduling models
+class ScheduleTextPostRequest(BaseModel):
+    message: str
+    schedule_time: datetime
+    link: Optional[str] = None
+    recurrence: Optional[str] = "none"
+    recurrence_end: Optional[datetime] = None
+    
+    @validator('schedule_time')
+    def validate_schedule_time(cls, v):
+        if v <= datetime.now():
+            raise ValueError('Schedule time must be in the future')
+        return v
+    
+    @validator('recurrence')
+    def validate_recurrence(cls, v):
+        valid_values = ['none', 'daily', 'weekly', 'monthly']
+        if v not in valid_values:
+            raise ValueError(f'Recurrence must be one of: {valid_values}')
+        return v
+
+class ScheduleImagePostRequest(BaseModel):
+    message: str
+    schedule_time: datetime
+    alt_text: Optional[str] = None
+    recurrence: Optional[str] = "none"
+    recurrence_end: Optional[datetime] = None
+    
+    @validator('schedule_time')
+    def validate_schedule_time(cls, v):
+        if v <= datetime.now():
+            raise ValueError('Schedule time must be in the future')
+        return v
+    
+    @validator('recurrence')
+    def validate_recurrence(cls, v):
+        valid_values = ['none', 'daily', 'weekly', 'monthly']
+        if v not in valid_values:
+            raise ValueError(f'Recurrence must be one of: {valid_values}')
+        return v
+
+class UpdateScheduledPostRequest(BaseModel):
+    message: Optional[str] = None
+    schedule_time: Optional[datetime] = None
+    link: Optional[str] = None
+    alt_text: Optional[str] = None
+    recurrence: Optional[str] = None
+    recurrence_end: Optional[datetime] = None
+    
+    @validator('schedule_time')
+    def validate_schedule_time(cls, v):
+        if v and v <= datetime.now():
+            raise ValueError('Schedule time must be in the future')
+        return v
+
+class ScheduledPostResponse(BaseModel):
+    id: str
+    post_type: str
+    message: str
+    schedule_time: datetime
+    status: str
+    recurrence: str
+    recurrence_end: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    link: Optional[str] = None
+    image_path: Optional[str] = None
+    alt_text: Optional[str] = None
+    facebook_post_id: Optional[str] = None
 
 @app.get("/")
 async def root():
@@ -333,6 +406,253 @@ async def validate_config():
     except Exception as e:
         logger.error(f"Config validation error: {e}")
         raise HTTPException(status_code=500, detail=f"Configuration validation failed: {str(e)}")
+
+# SCHEDULING ENDPOINTS
+
+@app.post("/api/posts/schedule", response_model=ScheduledPostResponse)
+async def schedule_text_post(post_request: ScheduleTextPostRequest):
+    """Schedule a text post for future publishing"""
+    try:
+        # Convert string recurrence to enum
+        recurrence = RecurrenceType(post_request.recurrence)
+        
+        # Schedule the post
+        scheduled_post = post_queue.schedule_text_post(
+            message=post_request.message,
+            schedule_time=post_request.schedule_time,
+            link=post_request.link,
+            recurrence=recurrence,
+            recurrence_end=post_request.recurrence_end
+        )
+        
+        logger.info(f"Text post scheduled: {scheduled_post.id} for {scheduled_post.schedule_time}")
+        
+        return ScheduledPostResponse(
+            id=scheduled_post.id,
+            post_type=scheduled_post.post_type,
+            message=scheduled_post.message,
+            schedule_time=scheduled_post.schedule_time,
+            status=scheduled_post.status.value,
+            recurrence=scheduled_post.recurrence.value,
+            recurrence_end=scheduled_post.recurrence_end,
+            created_at=scheduled_post.created_at,
+            updated_at=scheduled_post.updated_at,
+            link=scheduled_post.link
+        )
+        
+    except SchedulingError as e:
+        logger.error(f"Scheduling failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Scheduling error: {e.message}")
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to schedule post: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to schedule post: {str(e)}")
+
+@app.post("/api/posts/schedule-image", response_model=ScheduledPostResponse)
+async def schedule_image_post(
+    message: str = Form(...),
+    schedule_time: datetime = Form(...),
+    alt_text: Optional[str] = Form(None),
+    recurrence: str = Form("none"),
+    image: UploadFile = File(...)
+):
+    """Schedule an image post for future publishing"""
+    try:
+        # Save uploaded image to media directory
+        import tempfile
+        import shutil
+        
+        # Create media directory path
+        media_dir = os.path.join(os.path.dirname(__file__), 'media')
+        os.makedirs(media_dir, exist_ok=True)
+        
+        # Generate unique filename
+        import uuid
+        file_ext = os.path.splitext(image.filename)[1]
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        image_path = os.path.join(media_dir, unique_filename)
+        
+        # Save the image
+        with open(image_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+        
+        # Convert string recurrence to enum
+        recurrence_type = RecurrenceType(recurrence)
+        
+        # Schedule the post
+        scheduled_post = post_queue.schedule_image_post(
+            message=message,
+            image_path=image_path,
+            schedule_time=schedule_time,
+            alt_text=alt_text,
+            recurrence=recurrence_type
+        )
+        
+        logger.info(f"Image post scheduled: {scheduled_post.id} for {scheduled_post.schedule_time}")
+        
+        return ScheduledPostResponse(
+            id=scheduled_post.id,
+            post_type=scheduled_post.post_type,
+            message=scheduled_post.message,
+            schedule_time=scheduled_post.schedule_time,
+            status=scheduled_post.status.value,
+            recurrence=scheduled_post.recurrence.value,
+            recurrence_end=scheduled_post.recurrence_end,
+            created_at=scheduled_post.created_at,
+            updated_at=scheduled_post.updated_at,
+            image_path=scheduled_post.image_path,
+            alt_text=scheduled_post.alt_text
+        )
+        
+    except SchedulingError as e:
+        logger.error(f"Image scheduling failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Scheduling error: {e.message}")
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to schedule image post: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to schedule image post: {str(e)}")
+
+@app.get("/api/posts/scheduled")
+async def get_scheduled_posts(
+    status: Optional[str] = None,
+    limit: Optional[int] = None
+):
+    """Get list of scheduled posts"""
+    try:
+        # Convert status string to enum if provided
+        status_filter = None
+        if status:
+            try:
+                status_filter = PostStatus(status)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        
+        # Get scheduled posts
+        scheduled_posts = post_queue.get_scheduled_posts(
+            status_filter=status_filter,
+            limit=limit
+        )
+        
+        # Convert to response format
+        posts_data = []
+        for post in scheduled_posts:
+            posts_data.append({
+                'id': post.id,
+                'post_type': post.post_type,
+                'message': post.message,
+                'schedule_time': post.schedule_time.isoformat(),
+                'status': post.status.value,
+                'recurrence': post.recurrence.value,
+                'recurrence_end': post.recurrence_end.isoformat() if post.recurrence_end else None,
+                'created_at': post.created_at.isoformat(),
+                'updated_at': post.updated_at.isoformat(),
+                'link': post.link,
+                'image_path': post.image_path,
+                'alt_text': post.alt_text,
+                'facebook_post_id': post.facebook_post_id
+            })
+        
+        return {
+            'success': True,
+            'posts': posts_data,
+            'count': len(posts_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get scheduled posts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get scheduled posts: {str(e)}")
+
+@app.put("/api/posts/schedule/{post_id}", response_model=ScheduledPostResponse)
+async def update_scheduled_post(post_id: str, update_request: UpdateScheduledPostRequest):
+    """Update a scheduled post"""
+    try:
+        # Prepare update data
+        update_data = {}
+        if update_request.message is not None:
+            update_data['message'] = update_request.message
+        if update_request.schedule_time is not None:
+            update_data['schedule_time'] = update_request.schedule_time
+        if update_request.link is not None:
+            update_data['link'] = update_request.link
+        if update_request.alt_text is not None:
+            update_data['alt_text'] = update_request.alt_text
+        if update_request.recurrence is not None:
+            update_data['recurrence'] = RecurrenceType(update_request.recurrence)
+        if update_request.recurrence_end is not None:
+            update_data['recurrence_end'] = update_request.recurrence_end
+        
+        # Update the post
+        updated_post = post_queue.update_scheduled_post(post_id, **update_data)
+        
+        if not updated_post:
+            raise HTTPException(status_code=404, detail="Scheduled post not found")
+        
+        logger.info(f"Updated scheduled post: {post_id}")
+        
+        return ScheduledPostResponse(
+            id=updated_post.id,
+            post_type=updated_post.post_type,
+            message=updated_post.message,
+            schedule_time=updated_post.schedule_time,
+            status=updated_post.status.value,
+            recurrence=updated_post.recurrence.value,
+            recurrence_end=updated_post.recurrence_end,
+            created_at=updated_post.created_at,
+            updated_at=updated_post.updated_at,
+            link=updated_post.link,
+            image_path=updated_post.image_path,
+            alt_text=updated_post.alt_text,
+            facebook_post_id=updated_post.facebook_post_id
+        )
+        
+    except SchedulingError as e:
+        logger.error(f"Failed to update scheduled post: {e}")
+        raise HTTPException(status_code=400, detail=f"Update error: {e.message}")
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to update scheduled post: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update scheduled post: {str(e)}")
+
+@app.delete("/api/posts/schedule/{post_id}")
+async def cancel_scheduled_post(post_id: str):
+    """Cancel (soft delete) a scheduled post"""
+    try:
+        success = post_queue.cancel_scheduled_post(post_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Scheduled post not found")
+        
+        logger.info(f"Cancelled scheduled post: {post_id}")
+        
+        return {
+            'success': True,
+            'message': f'Scheduled post {post_id} has been cancelled'
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to cancel scheduled post: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel scheduled post: {str(e)}")
+
+@app.get("/api/posts/schedule/stats")
+async def get_scheduling_stats():
+    """Get scheduling queue statistics"""
+    try:
+        stats = post_queue.get_queue_stats()
+        
+        return {
+            'success': True,
+            'stats': stats
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get scheduling stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get scheduling stats: {str(e)}")
 
 # Global exception handler
 @app.exception_handler(Exception)
