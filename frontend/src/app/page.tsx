@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 export default function Home() {
+  const router = useRouter()
   const [apiStatus, setApiStatus] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -88,12 +91,18 @@ export default function Home() {
         </div>
 
         <div className="space-x-4">
-          <button className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+          <button 
+            onClick={() => router.push('/dashboard')}
+            className="bg-blue-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+          >
             Get Started
           </button>
-          <button className="bg-gray-200 text-gray-800 px-8 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
-            Learn More
-          </button>
+          <Link 
+            href="/dashboard"
+            className="inline-block bg-gray-200 text-gray-800 px-8 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200"
+          >
+            View Dashboard
+          </Link>
         </div>
       </div>
     </div>
