@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import DashboardLayout from '@/components/dashboard-layout'
+import { StatsCards, EngagementCards, SystemHealthCard } from '@/components/dashboard/stats-cards'
+import { UpcomingPostsCard } from '@/components/dashboard/upcoming-posts'
+import { RecentActivityCard } from '@/components/dashboard/recent-activity'
 import { 
   Calendar, 
   FileText, 
@@ -165,7 +168,7 @@ export default function DashboardPage() {
     )
   }
 
-  return (
+return (
     <DashboardLayout>
       <div className="space-y-8">
         {/* Header */}
@@ -176,101 +179,22 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {statCards.map((stat) => (
-            <div key={stat.name} className="bg-white overflow-hidden rounded-lg shadow">
-              <div className="p-6">
-                <div className="flex items-center">
-                  <div className={`flex-shrink-0 p-2 rounded-md ${stat.bgColor}`}>
-                    <stat.icon className={`h-6 w-6 ${stat.color}`} />
-                  </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-500">{stat.name}</p>
-                    <p className="text-2xl font-semibold text-gray-900">{stat.value}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* Stats Cards */}
+        <StatsCards />
 
         {/* Two Column Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Upcoming Posts */}
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">Upcoming Posts</h3>
-            </div>
-            <div className="divide-y divide-gray-200">
-              {upcomingPosts.length > 0 ? (
-                upcomingPosts.slice(0, 5).map((post) => (
-                  <div key={post.id} className="px-6 py-4">
-                    <div className="flex items-start space-x-3">
-                      <div className="flex-shrink-0">
-                        <Clock className="h-5 w-5 text-gray-400 mt-0.5" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">
-                          {post.message}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {new Date(post.schedule_time).toLocaleDateString()} at{' '}
-                          {new Date(post.schedule_time).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mt-1">
-                          {post.post_type}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="px-6 py-8 text-center">
-                  <Clock className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">No scheduled posts</h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    Get started by scheduling your first post.
-                  </p>
-                </div>
-              )}
-            </div>
-            {upcomingPosts.length > 0 && (
-              <div className="px-6 py-3 bg-gray-50 border-t border-gray-200">
-                <a href="/dashboard/scheduled" className="text-sm font-medium text-blue-600 hover:text-blue-500">
-                  View all scheduled posts →
-                </a>
-              </div>
-            )}
-          </div>
+          <UpcomingPostsCard />
 
           {/* Engagement Stats */}
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">Engagement Overview</h3>
-            </div>
-            <div className="p-6">
-              <div className="space-y-4">
-                {engagementStats.map((stat) => (
-                  <div key={stat.name} className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <stat.icon className={`h-5 w-5 ${stat.color} mr-3`} />
-                      <span className="text-sm font-medium text-gray-900">{stat.name}</span>
-                    </div>
-                    <span className="text-sm font-semibold text-gray-900">{stat.value}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 pt-4 border-t border-gray-200">
-                <a href="/dashboard/analytics" className="text-sm font-medium text-blue-600 hover:text-blue-500">
-                  View detailed analytics →
-                </a>
-              </div>
-            </div>
-          </div>
+          <EngagementCards />
+
+          {/* System Health */}
+          <SystemHealthCard />
+
+          {/* Recent Activity */}
+          <RecentActivityCard />
         </div>
 
         {/* Quick Actions */}

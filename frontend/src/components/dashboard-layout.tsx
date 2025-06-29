@@ -16,6 +16,7 @@ import {
   PlusCircle,
   Clock
 } from 'lucide-react'
+import { RealTimeNotifications } from '@/components/notifications/real-time-notifications'
 
 const navigation = [
   { name: 'Overview', href: '/dashboard', icon: Home },
@@ -83,6 +84,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
       {/* Main content */}
       <div className="pl-72">
+        {/* Top Header with Notifications */}
+        <div className="sticky top-0 z-40 bg-white border-b border-gray-200">
+          <div className="flex items-center justify-end px-4 sm:px-6 lg:px-8 py-4">
+            <RealTimeNotifications />
+          </div>
+        </div>
+        
         <main className="py-10">
           <div className="px-4 sm:px-6 lg:px-8">
             {children}
